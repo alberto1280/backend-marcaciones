@@ -1,0 +1,92 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum EstadoAsistencia {
+  APROBADA
+  ALERTA_GEOCERCA
+  ALERTA_IDENTIDAD
+  REVISION_MANUAL
+}
+
+enum TipoMarcacion {
+  ENTRADA
+  SALIDA
+}
+
+model Empresa {
+  id          String      @id @default(uuid())
+  nombre      String
+  ruc         String      @unique
+  activa      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  ubicaciones Ubicacion[]
+  agentes     Agente[]
+}
+
+model Ubicacion {
+  id          String       @id @default(uuid())
+  empresaId   String
+  empresa     Empresa      @relation(fields: [empresaId], references: [id])
+  nombre      String
+  latitud     Float
+  longitud    Float
+  radioMetros Int          @default(50)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  turnos      Turno[]
+  asistencias Asistencia[]
+}
+
+model Agente {
+  id              String       @id @default(uuid())
+  empresaId       String
+  empresa         Empresa      @relation(fields: [empresaId], references: [id])
+  nombre          String
+  cedula          String       @unique
+  urlFotoMaestro  String?
+  telefono        String?
+  activo          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  turnos          Turno[]
+  asistencias     Asistencia[]
+}
+
+model Turno {
+  id                  String    @id @default(uuid())
+  agenteId            String
+  agente              Agente    @relation(fields: [agenteId], references: [id])
+  ubicacionId         String
+  ubicacion           Ubicacion @relation(fields: [ubicacionId], references: [id])
+  horaEntradaEsperada String    // Formato HH:mm (ej: "08:00")
+  horaSalidaEsperada  String    // Formato HH:mm (ej: "16:00")
+  diasSemana          String    // Formato JSON o CSV (ej: "1,2,3,4,5")
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model Asistencia {
+  id                   String           @id @default(uuid())
+  agenteId             String
+  agente               Agente           @relation(fields: [agenteId], references: [id])
+  ubicacionId          String
+  ubicacion            Ubicacion        @relation(fields: [ubicacionId], references: [id])
+  tipo                 TipoMarcacion    @default(ENTRADA)
+  latitudMarcacion     Float
+  longitudMarcacion    Float
+  distanciaMetros      Float
+  urlFotoEvidencia     String
+  porcentajeBiometria  Float            @default(0.0)
+  estado               EstadoAsistencia @default(APROBADA)
+  minutosTarde         Int              @default(0)
+  modoOffline          Boolean          @default(false)
+  fechaHoraMarcacion   DateTime         @default(now())
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
