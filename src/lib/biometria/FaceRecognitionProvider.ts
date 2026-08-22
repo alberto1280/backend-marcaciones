@@ -2,43 +2,48 @@ import * as faceapi from '@vladmandic/face-api';
 import { Canvas, Image, ImageData } from 'canvas';
 import path from 'path';
 
-// Monkey patch face-api para entornos Node.js utilizando node-canvas
-// @ts-ignore
-faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
+let isBiometryInitialized = false;
+
+async function initBiometria() {
+  try {
+    // Monkey patch face-api para entornos Node.js utilizando node-canvas
+    // @ts-ignore
+    faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
+
+    // Intentamos cargar los modelos desde la carpeta pública en la raíz
+    const pathModelos = path.join(process.cwd(), 'public', 'models');
+    console.log(`[FaceRecognitionProvider] Intentando cargar modelos de face-api desde: ${pathModelos}`);
+
+    // Intentamos cargar los modelos (ssdMobilenetv1, faceLandmark68Net, faceRecognitionNet)
+    await Promise.all([
+      faceapi.nets.ssdMobilenetv1.loadFromDisk(pathModelos),
+      faceapi.nets.faceLandmark68Net.loadFromDisk(pathModelos),
+      faceapi.nets.faceRecognitionNet.loadFromDisk(pathModelos)
+    ]);
+
+    FaceRecognitionProvider.modelsLoaded = true;
+    console.log('[FaceRecognitionProvider] Modelos de face-api cargados con éxito.');
+  } catch (error: any) {
+    console.error('[FaceRecognitionProvider] Error durante initBiometria:', error);
+    console.warn(
+      '[FaceRecognitionProvider] Advertencia: No se cargaron los modelos desde disco o falló la inicialización. ' +
+      'Usando simulación robusta de fallback para pruebas físicas. Detalle:', 
+      error.message
+    );
+  }
+}
 
 export class FaceRecognitionProvider {
-  private static modelsLoaded = false;
-
-  private static async cargarModelos() {
-    if (this.modelsLoaded) return;
-    
-    try {
-      // Intentamos cargar los modelos desde la carpeta pública en la raíz
-      const pathModelos = path.join(process.cwd(), 'public/models');
-      console.log(`[FaceRecognitionProvider] Intentando cargar modelos de face-api desde: ${pathModelos}`);
-      
-      // Intentamos cargar los modelos (ssdMobilenetv1, faceLandmark68Net, faceRecognitionNet)
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromDisk(pathModelos),
-        faceapi.nets.faceLandmark68Net.loadFromDisk(pathModelos),
-        faceapi.nets.faceRecognitionNet.loadFromDisk(pathModelos)
-      ]);
-      
-      this.modelsLoaded = true;
-      console.log('[FaceRecognitionProvider] Modelos de face-api cargados con éxito.');
-    } catch (error: any) {
-      console.warn(
-        '[FaceRecognitionProvider] Advertencia: No se cargaron los modelos desde disco. ' +
-        'Usando simulación robusta de fallback para pruebas físicas. Detalle:', 
-        error.message
-      );
-    }
-  }
+  public static modelsLoaded = false;
 
   public static async verificarRostro(fotoBase64: string, agenteId: string): Promise<boolean> {
     try {
+      if (!isBiometryInitialized) {
+        await initBiometria();
+        isBiometryInitialized = true;
+      }
+
       console.log(`[FaceRecognitionProvider] Iniciando verificación biométrica para agente: ${agenteId}`);
-      await this.cargarModelos();
 
       // Sanitizar prefijo base64 si está presente
       const base64Limpio = fotoBase64.replace(/^data:image\/\w+;base64,/, '');
