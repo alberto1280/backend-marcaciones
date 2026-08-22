@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { verificarRostro } from '@/lib/biometria/FaceRecognitionProvider';
 
 // Función para calcular la distancia en metros usando la Fórmula de Haversine
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -20,35 +21,28 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-
-    // Paso A: Extraer del FormData los campos
-    const agenteId = formData.get('agenteId') as string | null;
-    const ubicacionId = formData.get('ubicacionId') as string | null;
-    const tipo = (formData.get('tipo') as string | null) || 'ENTRADA'; // ENTRADA o SALIDA
-    const latitudStr = formData.get('latitud') as string | null;
-    const longitudStr = formData.get('longitud') as string | null;
-    const fotoEvidencia = formData.get('foto_evidencia') as File | null;
+    const body = await request.json();
+    const { agenteId, ubicacionId, tipo, latitud, longitud, foto_evidencia } = body;
 
     // Validación de campos obligatorios
-    if (!agenteId || !ubicacionId || !latitudStr || !longitudStr || !fotoEvidencia) {
+    if (!agenteId || !ubicacionId || !latitud || !longitud || !foto_evidencia) {
       return NextResponse.json(
-        { error: 'Faltan parámetros obligatorios en la petición.' },
+        { error: 'Faltan parámetros obligatorios en la petición (agenteId, ubicacionId, latitud, longitud, foto_evidencia).' },
         { status: 400 }
       );
     }
 
-    const latitud = parseFloat(latitudStr);
-    const longitud = parseFloat(longitudStr);
+    const lat = parseFloat(latitud);
+    const lon = parseFloat(longitud);
 
-    if (isNaN(latitud) || isNaN(longitud)) {
+    if (isNaN(lat) || isNaN(lon)) {
       return NextResponse.json(
         { error: 'Coordenadas GPS inválidas.' },
         { status: 400 }
       );
     }
 
-    // Paso B: Validar si el Agente y la Ubicación existen en Prisma
+    // Paso A: Validar si la Ubicación y Agente existen en Prisma
     const agente = await prisma.agente.findUnique({
       where: { id: agenteId },
     });
@@ -71,101 +65,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Paso C: Biometría Facial llamando al Microservicio de Python en localhost:8000
-    // Simulamos el envío de la foto_maestro del agente.
-    // Si no está configurada la 'urlFotoMaestro' en el Agente, usamos la foto de evidencia
-    // como foto de maestro para garantizar que la simulación de pruebas físicas en Android
-    // sea 100% exitosa y devuelva coincidencia sin problemas de configuración de S3.
-    let fotoMaestroBlob: Blob | File = fotoEvidencia;
-
-    if (agente.urlFotoMaestro) {
-      try {
-        const fetchRes = await fetch(agente.urlFotoMaestro);
-        if (fetchRes.ok) {
-          fotoMaestroBlob = await fetchRes.blob();
-        }
-      } catch (error) {
-        console.warn(
-          'Error al descargar foto_maestro, usando simulación (fallback a foto_evidencia):',
-          error
-        );
-      }
-    }
-
-    const pythonFormData = new FormData();
-    pythonFormData.append('foto_maestro', fotoMaestroBlob, 'foto_maestro.jpg');
-    pythonFormData.append('foto_evidencia', fotoEvidencia, 'foto_evidencia.jpg');
-
-    let porcentajeBiometria = 0.0;
-    let biometriaOk = false;
-
-    try {
-      const biometriaResponse = await fetch('http://127.0.0.1:8000/comparar-rostros', {
-        method: 'POST',
-        body: pythonFormData,
-      });
-
-      if (!biometriaResponse.ok) {
-        const errorJson = await biometriaResponse.json();
-        return NextResponse.json(
-          { error: `Servicio de Biometría falló: ${errorJson.detail || biometriaResponse.statusText}` },
-          { status: biometriaResponse.status }
-        );
-      }
-
-      const biometriaData = await biometriaResponse.json();
-      porcentajeBiometria = biometriaData.porcentajeSimilitud;
-      biometriaOk = biometriaData.coincide;
-    } catch (error: any) {
-      console.error('Error de comunicación con el microservicio de biometría:', error);
-      return NextResponse.json(
-        { error: `No se pudo conectar con el microservicio de biometría facial: ${error.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Paso D: Reglas de Negocio
-    // 1. Calcular distancia GPS
+    // 1. Validar Geocerca
     const distanciaCalculada = haversineDistance(
-      latitud,
-      longitud,
+      lat,
+      lon,
       ubicacion.latitud,
       ubicacion.longitud
     );
 
-    let estadoFinal: 'APROBADA' | 'ALERTA_GEOCERCA' | 'ALERTA_IDENTIDAD' | 'REVISION_MANUAL' = 'APROBADA';
-
-    // Si la distancia es mayor al radioMetros de la Ubicación, el estado preliminar es ALERTA_GEOCERCA
     if (distanciaCalculada > ubicacion.radioMetros) {
-      estadoFinal = 'ALERTA_GEOCERCA';
+      console.warn(`[Geocerca] Agente ${agenteId} fuera de rango. Distancia: ${distanciaCalculada.toFixed(2)}m, Radio permitido: ${ubicacion.radioMetros}m`);
+      return NextResponse.json(
+        { 
+          status: 'ALERTA_GEOCERCA', 
+          message: 'Fuera del rango permitido' 
+        },
+        { status: 403 }
+      );
     }
 
-    // Si el porcentaje de similitud es menor al 70%, el estado cambia a ALERTA_IDENTIDAD
-    if (porcentajeBiometria < 70.0) {
-      estadoFinal = 'ALERTA_IDENTIDAD';
+    // Paso B: Validar Biometría Facial con el Adaptador
+    console.log(`[Biometría] Validando rostro para el agente ${agenteId}...`);
+    const biometriaOk = await verificarRostro(foto_evidencia, agenteId);
+
+    if (!biometriaOk) {
+      console.warn(`[Biometría] Falló la verificación facial para el agente ${agenteId}.`);
+      return NextResponse.json(
+        { 
+          status: 'ALERTA_IDENTIDAD', 
+          message: 'Verificación facial fallida' 
+        },
+        { status: 403 }
+      );
     }
 
-    // Paso E: Persistencia en la Base de Datos usando Prisma
-    // Generamos un mock de URL para la foto de evidencia guardada
-    const urlFotoEvidencia = `uploads/${Date.now()}_${fotoEvidencia.name || 'evidencia.jpg'}`;
+    // Paso C: Registrar Marcación (tabla Asistencia) como APROBADA
+    const urlFotoEvidencia = `uploads/${Date.now()}_evidencia.jpg`;
 
     const nuevaAsistencia = await prisma.asistencia.create({
       data: {
         agenteId: agente.id,
         ubicacionId: ubicacion.id,
         tipo: tipo === 'SALIDA' ? 'SALIDA' : 'ENTRADA',
-        latitudMarcacion: latitud,
-        longitudMarcacion: longitud,
+        latitudMarcacion: lat,
+        longitudMarcacion: lon,
         distanciaMetros: parseFloat(distanciaCalculada.toFixed(2)),
         urlFotoEvidencia,
-        porcentajeBiometria: parseFloat(porcentajeBiometria.toFixed(2)),
-        estado: estadoFinal,
-        minutosTarde: 0, // Se puede expandir con cálculo de turnos
+        porcentajeBiometria: 100.0,
+        estado: 'APROBADA',
+        minutosTarde: 0,
         modoOffline: false,
       },
     });
 
-    // Paso F: Devolver respuesta confirmando a la app móvil
+    console.log(`[Marcación] Marcación exitosa registrada para el agente ${agenteId} en la ubicación ${ubicacionId}.`);
+
     return NextResponse.json({
       success: true,
       mensaje: 'Marcación de asistencia procesada y registrada exitosamente.',
@@ -177,7 +131,7 @@ export async function POST(request: NextRequest) {
         tipo: nuevaAsistencia.tipo,
         fechaHoraMarcacion: nuevaAsistencia.fechaHoraMarcacion,
       },
-    });
+    }, { status: 200 });
 
   } catch (error: any) {
     console.error('Error procesando marcación:', error);
