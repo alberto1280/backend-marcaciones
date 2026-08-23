@@ -23,19 +23,25 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { agenteId, ubicacionId, tipo, latitud, longitud, foto_evidencia } = body;
+    const formData = await request.formData();
+    
+    const agenteId = formData.get('agenteId') as string;
+    const ubicacionId = formData.get('ubicacionId') as string;
+    const tipo = formData.get('tipo') as string;
+    const latitudRaw = formData.get('latitud') as string;
+    const longitudRaw = formData.get('longitud') as string;
+    const foto = formData.get('foto_evidencia') as File | null;
 
     // Validación de campos obligatorios
-    if (!agenteId || !ubicacionId || !latitud || !longitud || !foto_evidencia) {
+    if (!agenteId || !ubicacionId || !latitudRaw || !longitudRaw || !foto) {
       return NextResponse.json(
         { error: 'Faltan parámetros obligatorios en la petición (agenteId, ubicacionId, latitud, longitud, foto_evidencia).' },
         { status: 400 }
       );
     }
 
-    const lat = parseFloat(latitud);
-    const lon = parseFloat(longitud);
+    const lat = parseFloat(latitudRaw);
+    const lon = parseFloat(longitudRaw);
 
     if (isNaN(lat) || isNaN(lon)) {
       return NextResponse.json(
@@ -43,6 +49,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
 
     // Paso A: Validar si la Ubicación y Agente existen en Prisma
     const agente = await prisma.agente.findUnique({
@@ -85,6 +92,11 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
+
+    // Convertir el archivo de la foto a Base64 para pasar al proveedor de biometría
+    const arrayBuffer = await foto.arrayBuffer();
+    const fotoBase64String = Buffer.from(arrayBuffer).toString('base64');
+    const foto_evidencia = `data:${foto.type || 'image/jpeg'};base64,${fotoBase64String}`;
 
     // Paso B: Validar Biometría Facial con el Adaptador
     console.log(`[Biometría] Validando rostro para el agente ${agenteId}...`);
