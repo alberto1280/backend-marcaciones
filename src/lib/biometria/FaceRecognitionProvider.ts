@@ -1,3 +1,9 @@
+if (typeof globalThis.TextEncoder === 'undefined') {
+  const { TextEncoder, TextDecoder } = require('util');
+  globalThis.TextEncoder = TextEncoder;
+  globalThis.TextDecoder = TextDecoder;
+}
+
 import * as faceapi from '@vladmandic/face-api';
 import { Canvas, Image, ImageData } from 'canvas';
 import path from 'path';
