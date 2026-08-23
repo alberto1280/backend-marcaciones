@@ -1,0 +1,28 @@
+# Dependencias (¡Muy importante ignorar para ahorrar tokens!)
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Archivos de compilación de Next.js y Vercel
+.next/
+out/
+build/
+dist/
+.vercel/
+
+# Archivos de entorno y logs
+*.log
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Caché de TypeScript y ESLint
+.tsbuildinfo
+.eslintcache
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db

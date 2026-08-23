@@ -1,0 +1,5 @@
+- Proyecto: Sistema de marcaciones y asistencia.
+- Arquitectura: Patrón Adaptador para separar la lógica de la IA de los controladores principales.
+- Capas: Next.js App Router (Backend/API), Prisma ORM con Neon (PostgreSQL), y un módulo biométrico interno en `src/lib/biometria`.
+- Stack técnico: Node.js, TypeScript, Next.js, @vladmandic/face-api.
+- Restricción de rendimiento: Mantén las respuestas de código directas al grano, evita lecturas masivas de archivos innecesarios y respeta las exclusiones del archivo `.clineignore`.
