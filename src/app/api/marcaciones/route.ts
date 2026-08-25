@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verificarRostro } from '@/lib/biometria/FaceRecognitionProvider';
+import { put } from '@vercel/blob';
 
 // Función para calcular la distancia en metros usando la Fórmula de Haversine
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -50,6 +51,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 1. Validaciones de Seguridad del archivo foto_evidencia
+    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(foto.type)) {
+      return NextResponse.json(
+        { error: `Tipo de archivo no permitido (${foto.type}). Solo se aceptan JPEG, PNG o WEBP.` },
+        { status: 400 }
+      );
+    }
+
+    const maxFileSize = 4 * 1024 * 1024; // 4MB
+    if (foto.size > maxFileSize) {
+      return NextResponse.json(
+        { error: `El archivo es demasiado grande (${(foto.size / (1024 * 1024)).toFixed(2)}MB). El límite es de 4MB.` },
+        { status: 400 }
+      );
+    }
 
     // Paso A: Validar si la Ubicación y Agente existen en Prisma
     const agente = await prisma.agente.findUnique({
@@ -113,9 +130,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Paso C: Registrar Marcación (tabla Asistencia) como APROBADA
-    const urlFotoEvidencia = `uploads/${Date.now()}_evidencia.jpg`;
+    // Paso C: Subir imagen verificada a Vercel Blob
+    console.log(`[Vercel Blob] Subiendo foto-evidencia de agente ${agenteId}...`);
+    const ext = foto.type.split('/')[1] || 'jpg';
+    const filename = `agentes/${agenteId}/${Date.now()}_evidencia.${ext}`;
+    
+    const blob = await put(filename, foto, { access: 'public', addRandomSuffix: true });
+    const urlFotoEvidencia = blob.url;
+    console.log(`[Vercel Blob] Foto subida exitosamente: ${urlFotoEvidencia}`);
 
+    // Paso D: Registrar Marcación (tabla Asistencia) como APROBADA con la URL real de Vercel Blob
     const nuevaAsistencia = await prisma.asistencia.create({
       data: {
         agenteId: agente.id,
